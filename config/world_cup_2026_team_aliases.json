@@ -1,5 +1,5 @@
 {
-  "algeria": ["Algeria", "ALG", "阿尔及利亚"],
+  "algeria": ["Algeria", "ALG", "阿尔及利亚", "阿尔及利"],
   "argentina": ["Argentina", "ARG", "阿根廷"],
   "australia": ["Australia", "AUS", "澳大利亚"],
   "austria": ["Austria", "AUT", "奥地利"],
@@ -13,7 +13,7 @@
   "croatia": ["Croatia", "CRO", "克罗地亚"],
   "curacao": ["Curacao", "Curaçao", "CUW", "库拉索"],
   "czechia": ["Czechia", "Czech Republic", "CZE", "捷克"],
-  "dr_congo": ["DR Congo", "Democratic Republic of the Congo", "DRC", "COD", "刚果民主共和国", "民主刚果"],
+  "dr_congo": ["DR Congo", "Democratic Republic of the Congo", "DRC", "COD", "刚果民主共和国", "民主刚果", "刚果金"],
   "ecuador": ["Ecuador", "ECU", "厄瓜多尔"],
   "egypt": ["Egypt", "EGY", "埃及"],
   "england": ["England", "ENG", "英格兰"],
@@ -46,5 +46,5 @@
   "turkiye": ["Türkiye", "Turkey", "TUR", "土耳其"],
   "united_states": ["United States", "USA", "USMNT", "美国"],
   "uruguay": ["Uruguay", "URU", "乌拉圭"],
-  "uzbekistan": ["Uzbekistan", "UZB", "乌兹别克斯坦"]
+  "uzbekistan": ["Uzbekistan", "UZB", "乌兹别克斯坦", "乌兹别克"]
 }

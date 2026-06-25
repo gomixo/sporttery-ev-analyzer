@@ -23,8 +23,40 @@ Because the CLI `fetch-browser` command is a manual capture placeholder, you mus
 1. Open a new page using `new_page` and navigate to the entry URL using `navigate_page`.
 2. Wait for the page content to load.
 3. For Pinnacle, if it is not displaying decimal odds, evaluate a script or click to switch the odds display setting to **Decimal** (Pinnacle URLs/settings usually let you switch format). Do not extract American or fractional odds.
-4. Execute `evaluate_script` to scrape the matches, start times, markets, and odds from the page DOM.
-5. Save the raw JSON data to `data/raw/` using `write_to_file`.
+4. Execute `evaluate_script` to scrape the visible matches, start times, markets, and odds from the page DOM.
+5. For Pinnacle, the fixed matchups list usually exposes only the main `1x2` market and non-equivalent Asian handicap lines. To support all three Sporttery EV markets, open each 2026 World Cup match detail page by clicking the row's right-side `+N` / `>` details entry.
+6. In each Pinnacle match detail page, extract only mathematically equivalent markets:
+   - `1x2` or `match_winner_3way` from the list or detail page.
+   - `3-Way Handicap`, saved as `market_type: "european_handicap"`.
+   - `Exact Total Goals`, saved as `market_type: "exact_total_goals"`.
+7. Return to the matchups list before opening the next match detail page. Keep this low-frequency and sequential; do not open many detail pages concurrently.
+8. Save the raw JSON data to `data/raw/` using `write_to_file`.
+
+### Sporttery Market Capture
+
+Capture these Sporttery market types when they are available:
+
+- `had`: standard win/draw/loss. Use outcome keys `home`, `draw`, `away`.
+- `hhad`: handicap win/draw/loss. Use outcome keys `home`, `draw`, `away`; preserve the displayed handicap in `handicap`.
+- `ttg`: total goals. Use the displayed total-goals buckets as outcome keys. These keys must later align exactly with Pinnacle `exact_total_goals`.
+
+Do not infer unavailable Sporttery markets. If a market is not on sale or not visible, leave it out and let normalization/reporting classify it as unavailable.
+
+### Pinnacle Detail-Page Market Capture
+
+Capture these Pinnacle market types:
+
+- `1x2` or `match_winner_3way`: standard three-way match winner. Use outcome keys `home`, `draw`, `away`.
+- `european_handicap`: from Pinnacle `3-Way Handicap`. Use outcome keys `home`, `draw`, `away`; preserve the displayed handicap exactly, such as `"-1"` or `"+1"`.
+- `exact_total_goals`: from Pinnacle `Exact Total Goals`. Use an empty string for `handicap`; outcome keys must match Sporttery `ttg` buckets exactly, such as `0`, `1`, `2`, `3+`.
+
+Do not capture or convert these Pinnacle markets as Sporttery equivalents:
+
+- `asian_handicap`: not equivalent to Sporttery three-way handicap win/draw/loss.
+- `over_under`: not equivalent to Sporttery total-goals bucket betting.
+- Any two-way market used as a substitute for a three-way or bucketed market.
+
+If the detail page does not contain `3-Way Handicap` or `Exact Total Goals`, do not synthesize them. Save only the markets actually displayed.
 
 ### Raw Snapshot Naming & Source Values
 - **Sporttery**: Save to `data/raw/YYYY-MM-DD_HHMMSS1_sporttery.json` (where `HHMMSS1` is the actual fetch time) with `"source": "sporttery_browser"`.
@@ -61,6 +93,16 @@ Ensure your generated raw JSON files strictly follow this structure:
 }
 ```
 *Note: Only record displayed data. Do not use LLM reasoning to infer or fill in missing fields.*
+
+### Market Type Mapping
+
+The Python normalizer already recognizes these equivalent market mappings:
+
+- Sporttery `had` -> normalized `1x2`; Pinnacle `1x2` / `match_winner_3way` -> normalized `1x2`.
+- Sporttery `hhad` -> normalized `handicap_3way`; Pinnacle `european_handicap` -> normalized `handicap_3way`.
+- Sporttery `ttg` -> normalized `total_goals`; Pinnacle `exact_total_goals` -> normalized `total_goals`.
+
+Market matching requires the same teams, compatible start times, the same handicap value where applicable, and exactly matching outcome keys. If any of these fail, do not calculate EV for that market.
 
 ## Expected Data Flow
 
