@@ -7,11 +7,19 @@ Thumbs.db
 # Python
 __pycache__/
 *.py[cod]
+.python-version
 .venv/
 venv/
 env/
 .env
 .env.*
+*.egg-info/
+.eggs/
+*.egg
+pip-wheel-metadata/
+htmlcov/
+.coverage
+.coverage.*
 
 # Node
 node_modules/
@@ -23,5 +31,29 @@ build/
 *.log
 .cache/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
 coverage/
 
+# Local generated snapshots and reports
+data/
+reports/
+outputs/
+artifacts/
+screenshots/
+
+# Development process documents and plans
+AGENTS.md
+code_review_report.md
+implementation_plan.md
+sports_lottery_value_betting_strategy.md
+*_plan.md
+*_review_report.md
+*_strategy.md
+*_notes.md
+*_draft.md
+*_scratch.md
+scratch/
+tmp/
+temp/

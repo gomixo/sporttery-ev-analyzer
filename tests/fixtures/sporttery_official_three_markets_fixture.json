@@ -1,0 +1,83 @@
+{
+  "source": "sporttery",
+  "url": "https://www.sporttery.cn/",
+  "fetched_at": "2026-06-25T05:10:00+00:00",
+  "notes": "Unit-test fixture only. Do not use as live Sporttery odds.",
+  "raw_payload": {
+    "matches": [
+      {
+        "match_id": "SAMPLE-WC-JPN-SWE",
+        "source_match_id": "SP-SAMPLE-001",
+        "home_team": "日本",
+        "away_team": "瑞典",
+        "start_time": "2026-06-25T23:00:00+00:00",
+        "markets": [
+          {
+            "market_type": "had",
+            "handicap": "",
+            "odds": {
+              "home": 1.60,
+              "draw": 3.57,
+              "away": 4.45
+            },
+            "odds_history": [
+              {
+                "published_at": "2026-06-25T04:20:25+00:00",
+                "odds": {
+                  "home": 1.64,
+                  "draw": 3.52,
+                  "away": 4.25
+                }
+              },
+              {
+                "published_at": "2026-06-25T05:33:38+00:00",
+                "odds": {
+                  "home": 1.60,
+                  "draw": 3.57,
+                  "away": 4.45
+                }
+              }
+            ]
+          },
+          {
+            "market_type": "hhad",
+            "handicap": "-1",
+            "odds": {
+              "home": 2.80,
+              "draw": 3.57,
+              "away": 2.03
+            },
+            "odds_history": [
+              {
+                "published_at": "2026-06-25T04:20:38+00:00",
+                "odds": {
+                  "home": 2.91,
+                  "draw": 3.60,
+                  "away": 1.97
+                }
+              },
+              {
+                "published_at": "2026-06-25T05:33:47+00:00",
+                "odds": {
+                  "home": 2.80,
+                  "draw": 3.57,
+                  "away": 2.03
+                }
+              }
+            ]
+          },
+          {
+            "market_type": "ttg",
+            "handicap": "",
+            "odds": {
+              "0": 12.0,
+              "1": 5.0,
+              "2": 3.4,
+              "3+": 1.85
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

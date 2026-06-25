@@ -1,0 +1,46 @@
+{
+  "source": "pinnacle",
+  "url": "https://www.pinnacle.com/en/soccer/fifa-world-cup/matchups/",
+  "fetched_at": "2026-06-25T05:11:00+00:00",
+  "notes": "Unit-test fixture only. Do not use as live Pinnacle odds.",
+  "raw_payload": {
+    "matches": [
+      {
+        "source_match_id": "PN-SAMPLE-001",
+        "home_team": "Japan",
+        "away_team": "Sweden",
+        "start_time": "2026-06-25T23:00:00+00:00",
+        "markets": [
+          {
+            "market_type": "match_winner_3way",
+            "handicap": "",
+            "odds": {
+              "home": 1.88,
+              "draw": 3.85,
+              "away": 4.75
+            }
+          },
+          {
+            "market_type": "european_handicap",
+            "handicap": "-1",
+            "odds": {
+              "home": 2.75,
+              "draw": 3.45,
+              "away": 2.15
+            }
+          },
+          {
+            "market_type": "exact_total_goals",
+            "handicap": "",
+            "odds": {
+              "0": 10.5,
+              "1": 5.4,
+              "2": 3.25,
+              "3+": 1.9
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
