@@ -184,7 +184,31 @@ class AnalysisTests(unittest.TestCase):
 
         self.assertIn("全部 EV 对比明细", markdown)
         self.assertIn("Beta United", markdown)
-        self.assertIn("-0.", markdown)
+        self.assertIn("-12.02%", markdown)
+
+    def test_markdown_outputs_ev_as_percent(self):
+        report = analyze(_normalized(), max_data_age_minutes=1000000)
+        markdown = render_markdown(report)
+
+        self.assertIn("7.33%", markdown)
+        self.assertNotIn("0.0733", markdown)
+
+    def test_market_snapshot_incomplete_blocks_report(self):
+        normalized = _normalized()
+        normalized["snapshot_integrity"] = {
+            "is_usable": False,
+            "errors": ["market_snapshot_incomplete: sporttery has hhad but Pinnacle has no european_handicap"],
+            "market_type_counts": {"1x2": 6},
+            "sporttery_market_type_counts": {"had": 4, "hhad": 6, "ttg": 6},
+        }
+
+        report = analyze(normalized, max_data_age_minutes=1000000)
+        markdown = render_markdown(report)
+
+        self.assertEqual(report["report_status"], "blocked")
+        self.assertEqual(report["single_ev"], [])
+        self.assertIn("market_snapshot_incomplete", report["snapshot_integrity"]["errors"][0])
+        self.assertIn("Pinnacle 玩法计数：1x2=6", markdown)
 
 
 if __name__ == "__main__":

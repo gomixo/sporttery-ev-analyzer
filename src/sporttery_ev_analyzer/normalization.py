@@ -36,6 +36,7 @@ def normalize_pair(
     alias_lookup = _build_alias_lookup(team_aliases if team_aliases is not None else _load_default_team_aliases())
     sporttery_rows = _extract_matches(sporttery_raw)
     market_rows = _extract_matches(market_raw)
+    snapshot_integrity = _snapshot_integrity(sporttery_rows, market_rows)
     used_market_indexes: set[int] = set()
     matches: list[dict[str, Any]] = []
     unmatched: list[dict[str, Any]] = []
@@ -72,6 +73,7 @@ def normalize_pair(
             "is_usable": not source_errors,
             "errors": source_errors,
         },
+        "snapshot_integrity": snapshot_integrity,
         "matches": matches,
         "unmatched": unmatched,
     }
@@ -167,6 +169,25 @@ def _merge_markets(
             unmatched.append({"source": "sporttery", "match": sporttery_match, "market": sporttery_market, "reason": "unsupported_market_type"})
             continue
         indexed_market = market_by_key.get(key)
+        sporttery_odds = sporttery_market.get("odds", {})
+        matched_outcomes = sorted(str(outcome) for outcome in sporttery_odds)
+        if not indexed_market and key[0] == "total_goals":
+            indexed_market = _partial_total_goals_market(key, sporttery_market, market_snapshots)
+            if indexed_market:
+                _, partial_market = indexed_market
+                matched_outcomes = _shared_total_goals_outcomes(sporttery_market, partial_market)
+                sporttery_odds = {outcome: sporttery_market.get("odds", {})[outcome] for outcome in matched_outcomes}
+                partial_market = dict(partial_market)
+                partial_market["odds"] = {outcome: partial_market.get("odds", {})[outcome] for outcome in matched_outcomes}
+                indexed_market = (indexed_market[0], partial_market)
+                unmatched.append(
+                    {
+                        "source": "sporttery,market",
+                        "match": sporttery_match,
+                        "market": sporttery_market,
+                        "reason": "total_goals_tail_not_equivalent",
+                    }
+                )
         if not indexed_market:
             unmatched.append(
                 {
@@ -181,6 +202,7 @@ def _merge_markets(
         matched_market_ids.add(market_index)
         match_id = sporttery_match.get("match_id") or sporttery_match.get("source_match_id")
         market_type, _, _ = key
+        market_odds = market_market.get("odds", {})
         merged.append(
             {
                 "match_id": str(match_id),
@@ -197,14 +219,15 @@ def _merge_markets(
                     "market": market_market.get("market_type"),
                 },
                 "handicap": sporttery_market.get("handicap"),
+                "matched_outcomes": matched_outcomes,
                 "matched_status": "matched",
                 "match_confidence": confidence,
                 "sporttery": {
-                    "odds": sporttery_market.get("odds", {}),
+                    "odds": sporttery_odds,
                     "updated_at": sporttery_market.get("updated_at"),
                 },
                 "market": {
-                    "odds": market_market.get("odds", {}),
+                    "odds": market_odds,
                     "updated_at": market_market.get("updated_at"),
                 },
             }
@@ -213,6 +236,62 @@ def _merge_markets(
         if index not in matched_market_ids and _market_key(market) is None:
             unmatched.append({"source": "market", "match": market_match, "market": market, "reason": "unsupported_market_type"})
     return merged, unmatched
+
+
+def _snapshot_integrity(sporttery_rows: list[dict[str, Any]], market_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    sporttery_counts = _market_type_counts(sporttery_rows)
+    market_counts = _market_type_counts(market_rows)
+    errors: list[str] = []
+    if sporttery_counts.get("hhad", 0) and not market_counts.get("european_handicap", 0):
+        errors.append("market_snapshot_incomplete: sporttery has hhad but Pinnacle has no european_handicap")
+    if sporttery_counts.get("ttg", 0) and not market_counts.get("exact_total_goals", 0):
+        errors.append("market_snapshot_incomplete: sporttery has ttg but Pinnacle has no exact_total_goals")
+    return {
+        "is_usable": not errors,
+        "errors": errors,
+        "sporttery_market_type_counts": sporttery_counts,
+        "market_type_counts": market_counts,
+    }
+
+
+def _market_type_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for match in rows:
+        for market in match.get("markets", []):
+            market_type = str(market.get("market_type", ""))
+            counts[market_type] = counts.get(market_type, 0) + 1
+    return counts
+
+
+def _partial_total_goals_market(
+    key: tuple[str, str, frozenset[str]],
+    sporttery_market: dict[str, Any],
+    market_snapshots: list[dict[str, Any]],
+) -> tuple[int, dict[str, Any]] | None:
+    market_type, handicap, _ = key
+    for index, market in enumerate(market_snapshots):
+        market_key = _market_key(market)
+        if not market_key or market_key[:2] != (market_type, handicap):
+            continue
+        if _shared_total_goals_outcomes(sporttery_market, market):
+            return index, market
+    return None
+
+
+def _shared_total_goals_outcomes(first: dict[str, Any], second: dict[str, Any]) -> list[str]:
+    first_odds = first.get("odds", {})
+    second_odds = second.get("odds", {})
+    if not isinstance(first_odds, dict) or not isinstance(second_odds, dict):
+        return []
+    return sorted((set(first_odds) & set(second_odds)), key=_outcome_sort_key)
+
+
+def _outcome_sort_key(outcome: str) -> tuple[int, str]:
+    text = str(outcome)
+    number = text.rstrip("+")
+    if number.isdigit():
+        return int(number), text
+    return 999, text
 
 
 def _load_default_team_aliases() -> dict[str, list[str]]:

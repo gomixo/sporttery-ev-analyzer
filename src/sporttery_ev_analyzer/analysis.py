@@ -26,7 +26,7 @@ def analyze(
         "max_source_delta_minutes": max_source_delta_minutes,
         "max_data_age_minutes": max_data_age_minutes,
     }
-    risks: list[str] = [
+    risks = [
         "本工具只输出分析报告，不自动下注、不提交订单、不联系售票系统。",
         "赔率数据高度依赖时间，实际决策必须人工基于最新数据复核。",
     ]
@@ -34,6 +34,18 @@ def analyze(
     source_validation = _source_validation(normalized)
     if not source_validation["is_usable"]:
         return _blocked_report(normalized, generated_at, {}, parameters, risks, source_validation)
+
+    snapshot_integrity = _snapshot_integrity(normalized)
+    if not snapshot_integrity["is_usable"]:
+        return _blocked_report(
+            normalized,
+            generated_at,
+            {},
+            parameters,
+            risks,
+            source_validation,
+            reason="Pinnacle 快照疑似不完整，可能访问了错误页面或盘口未展开，停止分析并建议人工复核。",
+        )
 
     freshness = _freshness(normalized, generated_at, max_source_delta_minutes, max_data_age_minutes)
     if not freshness["is_usable"]:
@@ -100,13 +112,14 @@ def analyze(
 
     positive_singles = [item for item in singles if item["single_ev"] > ev_threshold and item["single_ev"] > 0.0]
     combos = _build_combos(positive_singles, combo_ev_threshold, kelly_fraction)
-    conclusion = "存在可复核的正 EV 2串1候选" if combos else "无法配对，建议空仓"
+    conclusion = "存在可复核的正 EV 2 串 1 候选" if combos else "无法配对，建议空仓"
 
     return {
         "report_status": "ok",
         "generated_at": generated_at,
         "inputs": normalized.get("inputs", {}),
         "source_validation": source_validation,
+        "snapshot_integrity": snapshot_integrity,
         "freshness": freshness,
         "parameters": parameters,
         "conclusion": conclusion,
@@ -133,31 +146,43 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- 是否通过：{report.get('source_validation', {}).get('is_usable')}",
     ]
     source_errors = report.get("source_validation", {}).get("errors", [])
-    if source_errors:
-        lines.extend(f"- {error}" for error in source_errors)
-    else:
+    lines.extend(f"- {error}" for error in source_errors)
+    if not source_errors:
         lines.append("- 无数据源错误。")
+
+    integrity = report.get("snapshot_integrity", {})
+    integrity_errors = integrity.get("errors", [])
     lines.extend(
         [
-        "",
-        "## 时效性",
-        "",
+            "",
+            "## 快照完整性",
+            "",
+            f"- 是否通过：{integrity.get('is_usable')}",
+            f"- Pinnacle 玩法计数：{_format_counts(integrity.get('market_type_counts', {}))}",
         ]
     )
+    lines.extend(f"- {error}" for error in integrity_errors)
+    if not integrity_errors:
+        lines.append("- 无快照完整性错误。")
+
     freshness = report.get("freshness", {})
     lines.extend(
         [
+            "",
+            "## 时效性",
+            "",
             f"- 竞彩数据时间：{freshness.get('sporttery_fetched_at')}",
-            f"- 国际赔率数据时间：{freshness.get('market_fetched_at')}",
+            f"- Pinnacle 数据时间：{freshness.get('market_fetched_at')}",
             f"- 时间差分钟：{freshness.get('source_delta_minutes')}",
             f"- 竞彩数据年龄分钟：{freshness.get('sporttery_age_minutes')}",
-            f"- 国际赔率数据年龄分钟：{freshness.get('market_age_minutes')}",
+            f"- Pinnacle 数据年龄分钟：{freshness.get('market_age_minutes')}",
             f"- 是否可用于本次分析：{freshness.get('is_usable')}",
-        "",
+            "",
             "## 全部 EV 对比明细",
             "",
         ]
     )
+
     all_items = report.get("single_ev", [])
     if all_items:
         lines.append("| 比赛 | 玩法 | 盘口 | 选项 | 竞彩赔率 | 竞彩赔率时间 | Pinnacle赔率 | Pinnacle时间 | 公允概率 | EV |")
@@ -168,7 +193,7 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"| {match_name} | {item['market_type']} | {item.get('handicap', '')} | {item['outcome']} | "
                 f"{item['sporttery_odds']:.3f} | {item.get('sporttery_updated_at')} | "
                 f"{item['market_odds']:.3f} | {item.get('market_updated_at')} | "
-                f"{item['fair_probability']:.4f} | {item['single_ev']:.4f} |"
+                f"{_format_percent(item['fair_probability'])} | {_format_percent(item['single_ev'])} |"
             )
     else:
         lines.append("无可计算 EV 明细。")
@@ -182,12 +207,12 @@ def render_markdown(report: dict[str, Any]) -> str:
             match_name = f"{item['home_team']} vs {item['away_team']}"
             lines.append(
                 f"| {match_name} | {item['market_type']} | {item['outcome']} | "
-                f"{item['sporttery_odds']:.3f} | {item['fair_probability']:.4f} | {item['single_ev']:.4f} |"
+                f"{item['sporttery_odds']:.3f} | {_format_percent(item['fair_probability'])} | {_format_percent(item['single_ev'])} |"
             )
     else:
         lines.append("无正 EV 单项。")
 
-    lines.extend(["", "## 2串1候选", ""])
+    lines.extend(["", "## 2 串 1 候选", ""])
     combos = report.get("combo_candidates", [])
     if combos:
         lines.append("| 组合 | 组合赔率 | 组合 EV | 分数凯利资金比例 |")
@@ -195,7 +220,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         for combo in combos:
             name = " + ".join(f"{leg['home_team']} vs {leg['away_team']} {leg['outcome']}" for leg in combo["legs"])
             lines.append(
-                f"| {name} | {combo['combo_odds']:.3f} | {combo['combo_ev']:.4f} | {combo['stake_ratio']:.4f} |"
+                f"| {name} | {combo['combo_odds']:.3f} | {_format_percent(combo['combo_ev'])} | {_format_percent(combo['stake_ratio'])} |"
             )
     else:
         lines.append("无法配对，建议空仓。")
@@ -241,6 +266,7 @@ def _blocked_report(
         "generated_at": generated_at,
         "inputs": normalized.get("inputs", {}),
         "source_validation": source_validation or _source_validation(normalized),
+        "snapshot_integrity": _snapshot_integrity(normalized),
         "freshness": freshness,
         "parameters": parameters,
         "conclusion": blocked_reason,
@@ -269,6 +295,19 @@ def _source_validation(normalized: dict[str, Any]) -> dict[str, Any]:
             "errors": errors,
         }
     return {"is_usable": not errors, "errors": errors}
+
+
+def _snapshot_integrity(normalized: dict[str, Any]) -> dict[str, Any]:
+    integrity = normalized.get("snapshot_integrity")
+    if not isinstance(integrity, dict):
+        return {"is_usable": True, "errors": [], "market_type_counts": {}, "sporttery_market_type_counts": {}}
+    errors = [str(error) for error in integrity.get("errors", [])]
+    return {
+        "is_usable": not errors and bool(integrity.get("is_usable", True)),
+        "errors": errors,
+        "market_type_counts": integrity.get("market_type_counts", {}),
+        "sporttery_market_type_counts": integrity.get("sporttery_market_type_counts", {}),
+    }
 
 
 def _data_quality_warning(match: dict[str, Any], reason: str) -> dict[str, Any]:
@@ -363,3 +402,13 @@ def _build_combos(
             }
         )
     return sorted(combos, key=lambda item: item["combo_ev"], reverse=True)
+
+
+def _format_percent(value: Any) -> str:
+    return f"{float(value) * 100:.2f}%"
+
+
+def _format_counts(counts: Any) -> str:
+    if not isinstance(counts, dict) or not counts:
+        return "无"
+    return ", ".join(f"{key}={counts[key]}" for key in sorted(counts))

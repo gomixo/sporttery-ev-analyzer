@@ -126,6 +126,59 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(normalized["matches"], [])
         self.assertTrue(any(item["reason"] == "no_equivalent_market" for item in normalized["unmatched"]))
 
+    def test_total_goals_uses_shared_exact_outcomes_when_tail_differs(self):
+        sporttery = _raw_match(
+            "Alpha FC",
+            "Beta United",
+            "ttg",
+            "",
+            {"0": 8.0, "1": 4.0, "2": 3.2, "3": 3.8, "4": 6.0, "5": 12.0, "6": 20.0, "7+": 30.0},
+            source="sporttery",
+        )
+        market = _raw_match(
+            "Alpha FC",
+            "Beta United",
+            "exact_total_goals",
+            "",
+            {"0": 7.5, "1": 4.2, "2": 3.0, "3": 4.0, "4": 6.5, "5": 11.0, "6+": 18.0},
+            source="pinnacle",
+        )
+
+        normalized = normalize_pair(sporttery, market, max_start_delta_minutes=10)
+
+        self.assertEqual(len(normalized["matches"]), 1)
+        self.assertEqual(list(normalized["matches"][0]["sporttery"]["odds"]), ["0", "1", "2", "3", "4", "5"])
+        self.assertEqual(normalized["matches"][0]["sporttery"]["odds"].keys(), normalized["matches"][0]["market"]["odds"].keys())
+        self.assertTrue(any(item["reason"] == "total_goals_tail_not_equivalent" for item in normalized["unmatched"]))
+
+    def test_snapshot_integrity_flags_missing_pinnacle_handicap_and_total_goals(self):
+        sporttery = {
+            "source": "sporttery",
+            "fetched_at": "2026-06-25T10:00:00+00:00",
+            "raw_payload": {
+                "matches": [
+                    {
+                        "source_match_id": "SP001",
+                        "home_team": "Alpha FC",
+                        "away_team": "Beta United",
+                        "start_time": "2026-06-25T12:00:00+00:00",
+                        "markets": [
+                            {"market_type": "had", "handicap": "", "odds": {"home": 2.0, "draw": 3.0, "away": 3.5}},
+                            {"market_type": "hhad", "handicap": "-1", "odds": {"home": 3.0, "draw": 3.4, "away": 2.0}},
+                            {"market_type": "ttg", "handicap": "", "odds": {"0": 8.0, "1": 4.0, "2": 3.2, "3+": 2.1}},
+                        ],
+                    }
+                ]
+            },
+        }
+        market = _raw_match("Alpha FC", "Beta United", "1x2", "", {"home": 1.9, "draw": 3.2, "away": 4.0}, source="pinnacle")
+
+        normalized = normalize_pair(sporttery, market, max_start_delta_minutes=10)
+
+        self.assertFalse(normalized["snapshot_integrity"]["is_usable"])
+        self.assertEqual(normalized["snapshot_integrity"]["market_type_counts"], {"1x2": 1})
+        self.assertTrue(any("market_snapshot_incomplete" in error for error in normalized["snapshot_integrity"]["errors"]))
+
 
 def _raw_match(home_team, away_team, market_type, handicap, odds, source="sporttery"):
     return {
