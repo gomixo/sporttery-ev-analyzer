@@ -20,6 +20,8 @@ pip-wheel-metadata/
 htmlcov/
 .coverage
 .coverage.*
+summarize_results.py
+
 
 # Node
 node_modules/
@@ -49,7 +51,10 @@ AGENTS.md
 code_review_report.md
 implementation_plan.md
 sports_lottery_value_betting_strategy.md
+ev_betting_simulation_report.md
+ev_methodology_discussion.md
 *_plan.md
+*_report.md
 *_analysis_report.md
 *_review_report.md
 *_strategy.md
