@@ -4,6 +4,14 @@
 
 项目核心思路是：在竞彩赔率进入临场冻结或低频更新阶段后，对比国际市场实时赔率，用去抽水后的公允概率判断竞彩侧是否存在被低估的选项。
 
+## 项目启发
+
+本项目的启发来源之一是李永乐老师的视频：[一个视频告诉你关于赌球的一切](https://www.bilibili.com/video/BV1z17N6ZEXj/)。
+
+视频里最重要的数学直觉是：博彩公司主要通过赔率里的抽水赚钱，不需要操纵比赛。对一组互斥结果来说，如果 `1/赔率1 + 1/赔率2 + ... > 1`，多出来的部分就是内含抽水。价值投注的核心不是猜谁更可能赢，而是判断某个选项的赔率是否高于它的公允概率价值。
+
+本项目把这个直觉落到确定性代码里：先把 Pinnacle 等国际市场赔率去抽水，得到公允概率，再计算 `EV = 公允概率 × 竞彩赔率 - 1`。工具只做数学分析和人工复核辅助，不鼓励投注，也不做自动下注。
+
 ## 这个项目做什么
 
 - 获取并保存竞彩与国际赔率数据
@@ -33,6 +41,22 @@ EV = 公允概率 × 竞彩赔率 - 1
 ```
 
 只有 EV 大于 0 的选项，才会被视为候选。
+
+### 去抽水算法
+
+项目报告会同时输出三种去抽水方法，方便交叉复核：
+
+- **比例去水**：主算法。先计算每个选项的赔率倒数，再按倒数和归一化，得到总和为 1 的公允概率。
+- **Shin 去水**：把职业资金或知情交易者对赔率的影响建模为参数 `z`，通过数值求解得到概率分布，更适合观察 Pinnacle 这类受聪明资金影响较大的市场。
+- **指数去水**：也常被讨论为对数/幂方法。代码通过求解 `k`，让 `p_i = (1 / odds_i)^k` 后的概率和等于 1，用于修正大热-冷门偏差。
+
+当前正 EV 主筛选仍以比例去水为准，Shin 和指数去水用于对照：如果三种方法给出明显不同的结论，应优先人工复核，而不是机械下注。
+
+### 为什么多数 EV 是负的
+
+Pinnacle 通常被视为更接近高效市场的赔率锚点，抽水低，去水后更适合作为公允概率参考。竞彩属于娱乐型彩票，返还率更低、抽水更高；当两边对比赛结果的判断没有明显错位时，用 Pinnacle 公允概率乘以竞彩赔率，结果天然大多是负 EV。
+
+粗略量级上，Pinnacle 常见抽水约 `2%~4%`，竞彩常见抽水约 `11%~13%`，总进球数、比分等细分玩法可能更高。所以大量负 EV 不是程序 bug，而是高抽水和市场有效性的正常结果。只有当临场信息导致 Pinnacle 重新定价，而竞彩赔率仍滞后时，才可能出现正 EV 窗口。
 
 ### 不为凑单牺牲 EV
 
@@ -98,24 +122,18 @@ cp -R skills/sporttery-ev ~/.codex/skills/
 
 ## 快速开始
 
-本项目第一版采用本地 CLI：官方竞彩 raw JSON 与 Pinnacle raw JSON 进来，标准化 JSON、分析 JSON 和 Markdown 报告出去。
+安装 skill 后，通过提示词启动分析流程。
 
-```powershell
-python -m sporttery_ev_analyzer.cli normalize `
-  --sporttery-raw data/raw/YYYY-MM-DD_HHMMSS_sporttery.json `
-  --market-raw data/raw/YYYY-MM-DD_HHMMSS_pinnacle.json `
-  --output data/normalized/YYYY-MM-DD_HHMMSS_matches.json
+示例提示词：
 
-python -m sporttery_ev_analyzer.cli analyze `
-  --normalized data/normalized/YYYY-MM-DD_HHMMSS_matches.json `
-  --json-output data/analysis/YYYY-MM-DD_HHMMSS_ev_report.json `
-  --md-output data/analysis/YYYY-MM-DD_HHMMSS_ev_report.md
+```text
+使用 sporttery-ev skill，帮我分析今天世界杯可售竞彩比赛。
 ```
 
-如果没有安装为包运行，可先在仓库根目录设置：
+也可以指定更窄的目标：
 
-```powershell
-$env:PYTHONPATH = "src"
+```text
+使用 sporttery-ev skill，搜索并分析今晚世界杯中「巴西 vs 德国」相关竞彩比赛。
 ```
 
 ## 数据格式

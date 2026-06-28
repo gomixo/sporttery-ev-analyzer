@@ -3,8 +3,9 @@ from __future__ import annotations
 from datetime import timedelta
 from itertools import combinations
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from .calculations import combo_ev, fractional_kelly_stake_ratio, remove_margin_proportional, single_ev, validate_decimal_odds
+from .calculations import combo_ev, fractional_kelly_stake_ratio, remove_margin_all_methods, single_ev, validate_decimal_odds
 from .io_utils import parse_iso_datetime, utc_now_iso
 from .sources import validate_source_names
 
@@ -29,6 +30,7 @@ def analyze(
     risks = [
         "本工具只输出分析报告，不自动下注、不提交订单、不联系售票系统。",
         "赔率数据高度依赖时间，实际决策必须人工基于最新数据复核。",
+        "Shin/指数去水仅作敏感性对比，不自动替代主算法候选判断。",
     ]
 
     source_validation = _source_validation(normalized)
@@ -70,12 +72,21 @@ def analyze(
             sporttery_odds = _float_odds(match["sporttery"]["odds"])
             market_odds = _float_odds(match["market"]["odds"])
             _validate_same_outcomes(sporttery_odds, market_odds)
-            fair_probabilities = remove_margin_proportional(market_odds)
+            margin_methods = remove_margin_all_methods(market_odds)
+            if margin_methods["proportional"]["status"] != "ok":
+                raise ValueError(margin_methods["proportional"]["error"])
+            fair_probabilities = margin_methods["proportional"]["probabilities"]
         except (KeyError, TypeError, ValueError) as exc:
             warning = _data_quality_warning(match, str(exc))
             skipped.append(warning)
             data_quality_warnings.append(warning)
             continue
+
+        for method_name in ("shin", "power"):
+            if margin_methods[method_name]["status"] != "ok":
+                data_quality_warnings.append(
+                    _data_quality_warning(match, f"{method_name} margin removal failed: {margin_methods[method_name]['error']}")
+                )
 
         for outcome, probability in fair_probabilities.items():
             ev = single_ev(probability, sporttery_odds[outcome])
@@ -94,6 +105,7 @@ def analyze(
                     "market_updated_at": match.get("market", {}).get("updated_at"),
                     "fair_probability": probability,
                     "single_ev": ev,
+                    "method_comparison": _method_comparison(margin_methods, sporttery_odds, outcome),
                 }
             )
 
@@ -171,12 +183,13 @@ def render_markdown(report: dict[str, Any]) -> str:
             "",
             "## 时效性",
             "",
-            f"- 竞彩数据时间：{freshness.get('sporttery_fetched_at')}",
-            f"- Pinnacle 数据时间：{freshness.get('market_fetched_at')}",
+            f"- 竞彩数据抓取时间：{_format_beijing_time(freshness.get('sporttery_fetched_at'))}",
+            f"- Pinnacle 数据抓取时间：{_format_beijing_time(freshness.get('market_fetched_at'))}",
             f"- 时间差分钟：{freshness.get('source_delta_minutes')}",
             f"- 竞彩数据年龄分钟：{freshness.get('sporttery_age_minutes')}",
             f"- Pinnacle 数据年龄分钟：{freshness.get('market_age_minutes')}",
             f"- 是否可用于本次分析：{freshness.get('is_usable')}",
+            "- Pinnacle 不提供独立发布时间，赔率时间按抓取时间处理；竞彩若有玩法发布时间，只用于数据采集核对，不在明细表逐行展示。",
             "",
             "## 全部 EV 对比明细",
             "",
@@ -185,20 +198,25 @@ def render_markdown(report: dict[str, Any]) -> str:
 
     all_items = report.get("single_ev", [])
     if all_items:
-        lines.append("| 比赛 | 玩法 | 盘口 | 选项 | 竞彩赔率 | 竞彩赔率时间 | Pinnacle赔率 | Pinnacle时间 | 公允概率 | EV |")
-        lines.append("| --- | --- | --- | --- | ---: | --- | ---: | --- | ---: | ---: |")
+        lines.append("| 比赛 | 玩法 | 盘口 | 选项 | 竞彩赔率 | Pinnacle赔率 | 比例概率 | 比例EV | Shin概率 | Shin EV | 指数概率 | 指数EV |")
+        lines.append("| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
         for item in all_items:
             match_name = f"{item['home_team']} vs {item['away_team']}"
+            comparison = item.get("method_comparison", {})
             lines.append(
                 f"| {match_name} | {item['market_type']} | {item.get('handicap', '')} | {item['outcome']} | "
-                f"{item['sporttery_odds']:.3f} | {item.get('sporttery_updated_at')} | "
-                f"{item['market_odds']:.3f} | {item.get('market_updated_at')} | "
-                f"{_format_percent(item['fair_probability'])} | {_format_percent(item['single_ev'])} |"
+                f"{item['sporttery_odds']:.3f} | {item['market_odds']:.3f} | "
+                f"{_format_method_percent(comparison, 'proportional', 'fair_probability')} | "
+                f"{_format_method_percent(comparison, 'proportional', 'single_ev')} | "
+                f"{_format_method_percent(comparison, 'shin', 'fair_probability')} | "
+                f"{_format_method_percent(comparison, 'shin', 'single_ev')} | "
+                f"{_format_method_percent(comparison, 'power', 'fair_probability')} | "
+                f"{_format_method_percent(comparison, 'power', 'single_ev')} |"
             )
     else:
         lines.append("无可计算 EV 明细。")
 
-    lines.extend(["", "## 正 EV 单项", ""])
+    lines.extend(["", "## 正 EV 单项（主算法：比例去水）", ""])
     positives = report.get("positive_single_ev", [])
     if positives:
         lines.append("| 比赛 | 玩法 | 选项 | 竞彩赔率 | 公允概率 | EV |")
@@ -212,7 +230,7 @@ def render_markdown(report: dict[str, Any]) -> str:
     else:
         lines.append("无正 EV 单项。")
 
-    lines.extend(["", "## 2 串 1 候选", ""])
+    lines.extend(["", "## 2 串 1 候选（主算法：比例去水）", ""])
     combos = report.get("combo_candidates", [])
     if combos:
         lines.append("| 组合 | 组合赔率 | 组合 EV | 分数凯利资金比例 |")
@@ -380,6 +398,26 @@ def _validate_same_outcomes(first: dict[str, float], second: dict[str, float]) -
         raise ValueError(f"outcome mismatch: sporttery={sorted(first)} market={sorted(second)}")
 
 
+def _method_comparison(
+    margin_methods: dict[str, dict[str, Any]],
+    sporttery_odds: dict[str, float],
+    outcome: str,
+) -> dict[str, dict[str, Any]]:
+    comparison: dict[str, dict[str, Any]] = {}
+    for method_name, result in margin_methods.items():
+        if result["status"] != "ok":
+            comparison[method_name] = {"status": "failed", "error": result["error"]}
+            continue
+        probability = result["probabilities"][outcome]
+        comparison[method_name] = {
+            "status": "ok",
+            "fair_probability": probability,
+            "single_ev": single_ev(probability, sporttery_odds[outcome]),
+            **result["params"],
+        }
+    return comparison
+
+
 def _build_combos(
     positive_singles: list[dict[str, Any]],
     combo_ev_threshold: float,
@@ -406,6 +444,19 @@ def _build_combos(
 
 def _format_percent(value: Any) -> str:
     return f"{float(value) * 100:.2f}%"
+
+
+def _format_beijing_time(value: Any) -> str:
+    if not value:
+        return "无"
+    return parse_iso_datetime(str(value)).astimezone(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S 北京时间")
+
+
+def _format_method_percent(comparison: dict[str, Any], method_name: str, field: str) -> str:
+    method = comparison.get(method_name, {})
+    if method.get("status") != "ok" or field not in method:
+        return "N/A"
+    return _format_percent(method[field])
 
 
 def _format_counts(counts: Any) -> str:

@@ -50,6 +50,17 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(all(combo["legs"][0]["match_id"] != combo["legs"][1]["match_id"] for combo in report["combo_candidates"]))
         self.assertTrue(all(leg["single_ev"] > 0 for combo in report["combo_candidates"] for leg in combo["legs"]))
 
+    def test_analyze_includes_advanced_method_comparison_without_changing_primary_fields(self):
+        report = analyze(_normalized(), combo_ev_threshold=0.08, max_data_age_minutes=1000000)
+        first = report["single_ev"][0]
+
+        self.assertEqual(round(first["fair_probability"], 6), 0.499225)
+        self.assertEqual(first["method_comparison"]["proportional"]["status"], "ok")
+        self.assertEqual(first["method_comparison"]["shin"]["status"], "ok")
+        self.assertEqual(first["method_comparison"]["power"]["status"], "ok")
+        self.assertEqual(round(first["method_comparison"]["shin"]["fair_probability"], 6), 0.505907)
+        self.assertEqual(round(first["method_comparison"]["power"]["fair_probability"], 6), 0.508442)
+
     def test_analyze_blocks_when_source_time_delta_is_too_large(self):
         normalized = _normalized()
         normalized["inputs"]["market"]["fetched_at"] = "2026-06-25T14:30:00+00:00"
@@ -192,6 +203,51 @@ class AnalysisTests(unittest.TestCase):
 
         self.assertIn("7.33%", markdown)
         self.assertNotIn("0.0733", markdown)
+
+    def test_markdown_outputs_three_margin_methods_and_primary_label(self):
+        report = analyze(_normalized(), max_data_age_minutes=1000000)
+        markdown = render_markdown(report)
+
+        self.assertIn("比例概率", markdown)
+        self.assertIn("Shin概率", markdown)
+        self.assertIn("指数概率", markdown)
+        self.assertIn("正 EV 单项（主算法：比例去水）", markdown)
+        self.assertIn("2 串 1 候选（主算法：比例去水）", markdown)
+
+    def test_markdown_outputs_freshness_times_in_beijing_and_omits_row_times(self):
+        report = analyze(_normalized(), max_data_age_minutes=1000000)
+        markdown = render_markdown(report)
+
+        self.assertIn("竞彩数据抓取时间：2026-06-25 18:00:00 北京时间", markdown)
+        self.assertIn("Pinnacle 数据抓取时间：2026-06-25 18:02:00 北京时间", markdown)
+        self.assertIn("Pinnacle 不提供独立发布时间", markdown)
+        self.assertNotIn("竞彩赔率时间", markdown)
+        self.assertNotIn("Pinnacle时间", markdown)
+
+    def test_advanced_method_failure_does_not_block_primary_report(self):
+        normalized = _normalized()
+        normalized["matches"] = [
+            {
+                "match_id": "M005",
+                "home_team": "Even A",
+                "away_team": "Even B",
+                "start_time": "2026-06-25T12:00:00+00:00",
+                "market_type": "1x2",
+                "handicap": "",
+                "matched_status": "matched",
+                "match_confidence": 1.0,
+                "sporttery": {"odds": {"home": 2.9, "draw": 2.9, "away": 2.9}},
+                "market": {"odds": {"home": 3.0, "draw": 3.0, "away": 3.0}},
+            }
+        ]
+
+        report = analyze(normalized, max_data_age_minutes=1000000)
+        markdown = render_markdown(report)
+
+        self.assertEqual(report["report_status"], "ok")
+        self.assertEqual(report["single_ev"][0]["method_comparison"]["shin"]["status"], "failed")
+        self.assertIn("shin margin removal failed", report["data_quality_warnings"][0]["reason"])
+        self.assertIn("N/A", markdown)
 
     def test_market_snapshot_incomplete_blocks_report(self):
         normalized = _normalized()

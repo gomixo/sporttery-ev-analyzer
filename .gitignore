@@ -21,6 +21,7 @@ htmlcov/
 .coverage
 .coverage.*
 summarize_results.py
+scripts/simulate_single_bets.py
 
 
 # Node
@@ -45,8 +46,10 @@ reports/
 outputs/
 artifacts/
 screenshots/
+odds_update_times*.json
 
 # Development process documents and plans
+sporttery-ev-analyzer-docs/
 AGENTS.md
 code_review_report.md
 implementation_plan.md

@@ -1,6 +1,6 @@
 ---
 name: sporttery-ev
-description: Analyze 2026 FIFA World Cup Sporttery odds against Pinnacle market snapshots to produce reproducible +EV reports.
+description: Analyze 2026 FIFA World Cup Sporttery odds against Pinnacle market snapshots to produce reproducible +EV reports with proportional de-vig as the primary decision method plus Shin and power/logarithmic de-vig sensitivity comparisons.
 ---
 
 # Sporttery EV Analyzer
@@ -124,8 +124,17 @@ Once raw snapshots are saved, execute the calculations via the CLI. Market equiv
      --md-output data/analysis/2026-06-25_150025_ev_report.md
    ```
 
+## Report Interpretation
+
+- Proportional de-vig is the primary decision method.
+- `positive_single_ev`, `combo_candidates`, and `conclusion` are generated from proportional de-vig only.
+- Shin and power/logarithmic de-vig are sensitivity comparisons shown in JSON `method_comparison` and Markdown detail columns.
+- Do not add a leg to `combo_candidates` just because Shin or power/logarithmic EV is positive.
+- All de-vig calculations use each normalized match's `market.odds`, which must come from validated Pinnacle or `pinnacle_browser` source data.
+
 ## Execution Safety Checks
 
 - The CLI will block reports (`report_status = blocked`) if data age exceeds threshold or time delta between snapshots is too large.
-- 2-leg combination rules (combo candidates) are enforced by the CLI (only legs with EV > 0 are combined).
+- 2-leg combination rules are enforced by the CLI: only different-match legs with proportional de-vig EV > 0 are combined.
+- Shin or power/logarithmic de-vig failure does not necessarily block the primary report; inspect `data_quality_warnings`, and keep the primary conclusion tied to proportional de-vig.
 - If validation blocks or the CLI report status is `blocked`, stop and ask for manual review. Do not attempt to bypass CLI errors using LLM calculations.
