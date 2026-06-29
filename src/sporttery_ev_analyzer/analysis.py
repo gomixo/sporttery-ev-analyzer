@@ -198,8 +198,8 @@ def render_markdown(report: dict[str, Any]) -> str:
 
     all_items = report.get("single_ev", [])
     if all_items:
-        lines.append("| 比赛 | 玩法 | 盘口 | 选项 | 竞彩赔率 | Pinnacle赔率 | 比例概率 | 比例EV | Shin概率 | Shin EV | 指数概率 | 指数EV |")
-        lines.append("| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+        lines.append("| 比赛 | 玩法 | 盘口 | 选项 | 竞彩赔率 | Pinnacle赔率 | 比例概率 | 比例EV |")
+        lines.append("| --- | --- | --- | --- | ---: | ---: | ---: | ---: |")
         for item in all_items:
             match_name = f"{item['home_team']} vs {item['away_team']}"
             comparison = item.get("method_comparison", {})
@@ -207,7 +207,17 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"| {match_name} | {item['market_type']} | {item.get('handicap', '')} | {item['outcome']} | "
                 f"{item['sporttery_odds']:.3f} | {item['market_odds']:.3f} | "
                 f"{_format_method_percent(comparison, 'proportional', 'fair_probability')} | "
-                f"{_format_method_percent(comparison, 'proportional', 'single_ev')} | "
+                f"{_format_ev_percent(item['single_ev'])} |"
+            )
+
+        lines.extend(["", "## 辅助去水方法对比（Shin / 指数）", ""])
+        lines.append("| 比赛 | 玩法 | 盘口 | 选项 | Shin概率 | Shin EV | 指数概率 | 指数EV |")
+        lines.append("| --- | --- | --- | --- | ---: | ---: | ---: | ---: |")
+        for item in all_items:
+            match_name = f"{item['home_team']} vs {item['away_team']}"
+            comparison = item.get("method_comparison", {})
+            lines.append(
+                f"| {match_name} | {item['market_type']} | {item.get('handicap', '')} | {item['outcome']} | "
                 f"{_format_method_percent(comparison, 'shin', 'fair_probability')} | "
                 f"{_format_method_percent(comparison, 'shin', 'single_ev')} | "
                 f"{_format_method_percent(comparison, 'power', 'fair_probability')} | "
@@ -364,15 +374,22 @@ def _freshness(
     sporttery_dt = parse_iso_datetime(sporttery_time)
     market_dt = parse_iso_datetime(market_time)
     delta = abs(sporttery_dt - market_dt)
-    sporttery_age = abs(generated_at_dt - sporttery_dt)
-    market_age = abs(generated_at_dt - market_dt)
+    sporttery_age = generated_at_dt - sporttery_dt
+    market_age = generated_at_dt - market_dt
+    max_future_skew = timedelta(seconds=120)
+    sporttery_future_ok = sporttery_age >= -max_future_skew
+    market_future_ok = market_age >= -max_future_skew
+    sporttery_effective_age = max(sporttery_age, timedelta(0))
+    market_effective_age = max(market_age, timedelta(0))
     source_delta_ok = delta <= timedelta(minutes=max_source_delta_minutes)
-    sporttery_age_ok = sporttery_age <= timedelta(minutes=max_data_age_minutes)
-    market_age_ok = market_age <= timedelta(minutes=max_data_age_minutes)
-    is_usable = source_delta_ok and sporttery_age_ok and market_age_ok
+    sporttery_age_ok = sporttery_effective_age <= timedelta(minutes=max_data_age_minutes)
+    market_age_ok = market_effective_age <= timedelta(minutes=max_data_age_minutes)
+    is_usable = source_delta_ok and sporttery_age_ok and market_age_ok and sporttery_future_ok and market_future_ok
     reason = None
     if not source_delta_ok:
         reason = "source_time_delta_too_large"
+    elif not sporttery_future_ok or not market_future_ok:
+        reason = "source_fetched_at_in_future"
     elif not sporttery_age_ok or not market_age_ok:
         reason = "data_age_too_large"
     return {
@@ -444,6 +461,25 @@ def _build_combos(
 
 def _format_percent(value: Any) -> str:
     return f"{float(value) * 100:.2f}%"
+
+
+def _ev_marker(value: Any) -> str:
+    ev = float(value)
+    if ev > 0:
+        return "🟢"
+    if ev >= -0.025:
+        return "🟡"
+    if ev >= -0.05:
+        return "🟠"
+    return ""
+
+
+def _format_ev_percent(value: Any) -> str:
+    percent = _format_percent(value)
+    if float(value) > 0:
+        percent = f"**{percent}**"
+    marker = _ev_marker(value)
+    return f"{marker} {percent}" if marker else percent
 
 
 def _format_beijing_time(value: Any) -> str:

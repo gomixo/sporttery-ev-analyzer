@@ -1,6 +1,7 @@
 import unittest
 
 from sporttery_ev_analyzer.calculations import (
+    american_to_decimal,
     combo_ev,
     fractional_kelly_stake_ratio,
     remove_margin_all_methods,
@@ -45,6 +46,16 @@ class CalculationTests(unittest.TestCase):
     def test_single_ev_can_be_positive_or_negative(self):
         self.assertEqual(round(single_ev(0.5, 2.1), 4), 0.05)
         self.assertEqual(round(single_ev(0.45, 2.0), 4), -0.1)
+
+    def test_american_to_decimal_conversion(self):
+        self.assertEqual(round(american_to_decimal(150), 6), 2.5)
+        self.assertEqual(round(american_to_decimal(100), 6), 2.0)
+        self.assertEqual(round(american_to_decimal(-200), 6), 1.5)
+        self.assertEqual(round(american_to_decimal(-100), 6), 2.0)
+        self.assertEqual(round(american_to_decimal(4533), 6), 46.33)
+        self.assertEqual(round(american_to_decimal(-2705), 6), 1.036969)
+        with self.assertRaises(ValueError):
+            american_to_decimal(0)
 
     def test_combo_ev_and_fractional_kelly(self):
         expected_value = combo_ev(0.05, 0.04)

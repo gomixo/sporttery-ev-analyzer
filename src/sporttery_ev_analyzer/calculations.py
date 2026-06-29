@@ -12,6 +12,14 @@ def validate_decimal_odds(odds: dict[str, float]) -> None:
         raise ValueError(f"decimal odds must be greater than 1: {invalid}")
 
 
+def american_to_decimal(american_odds: int) -> float:
+    if american_odds == 0:
+        raise ValueError("american_odds must not be zero")
+    if american_odds > 0:
+        return 1 + american_odds / 100
+    return 1 + 100 / abs(american_odds)
+
+
 def remove_margin_proportional(odds: dict[str, float]) -> dict[str, float]:
     validate_decimal_odds(odds)
     inverse_sum = sum(1 / value for value in odds.values())

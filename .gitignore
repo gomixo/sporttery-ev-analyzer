@@ -49,6 +49,8 @@ screenshots/
 odds_update_times*.json
 
 # Development process documents and plans
+.agents/
+docs/
 sporttery-ev-analyzer-docs/
 AGENTS.md
 code_review_report.md

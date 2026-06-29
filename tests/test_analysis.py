@@ -40,6 +40,27 @@ def _normalized():
     }
 
 
+def _single_ev_row(match_id, home_team, ev):
+    return {
+        "match_id": match_id,
+        "home_team": home_team,
+        "away_team": "Away",
+        "start_time": "2026-06-25T12:00:00+00:00",
+        "market_type": "1x2",
+        "handicap": "",
+        "outcome": "home",
+        "sporttery_odds": 2.0,
+        "market_odds": 2.0,
+        "fair_probability": 0.5,
+        "single_ev": ev,
+        "method_comparison": {
+            "proportional": {"status": "ok", "fair_probability": 0.5, "single_ev": ev},
+            "shin": {"status": "ok", "fair_probability": 0.5, "single_ev": ev},
+            "power": {"status": "ok", "fair_probability": 0.5, "single_ev": ev},
+        },
+    }
+
+
 class AnalysisTests(unittest.TestCase):
     def test_analyze_builds_only_cross_match_positive_ev_combos(self):
         report = analyze(_normalized(), combo_ev_threshold=0.08, max_data_age_minutes=1000000)
@@ -106,6 +127,18 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(report["combo_candidates"], [])
         self.assertEqual(report["freshness"]["reason"], "data_age_too_large")
         self.assertEqual(report["parameters"]["max_data_age_minutes"], 1)
+
+    def test_analyze_blocks_when_source_fetched_at_is_in_future(self):
+        normalized = _normalized()
+        normalized["inputs"]["sporttery"]["fetched_at"] = "2999-06-25T10:00:00+00:00"
+        normalized["inputs"]["market"]["fetched_at"] = "2999-06-25T10:01:00+00:00"
+
+        report = analyze(normalized, max_data_age_minutes=1000000)
+
+        self.assertEqual(report["report_status"], "blocked")
+        self.assertEqual(report["single_ev"], [])
+        self.assertEqual(report["combo_candidates"], [])
+        self.assertEqual(report["freshness"]["reason"], "source_fetched_at_in_future")
 
     def test_invalid_odds_are_reported_as_data_quality_warnings(self):
         normalized = _normalized()
@@ -214,6 +247,49 @@ class AnalysisTests(unittest.TestCase):
         self.assertIn("正 EV 单项（主算法：比例去水）", markdown)
         self.assertIn("2 串 1 候选（主算法：比例去水）", markdown)
 
+    def test_markdown_splits_primary_and_auxiliary_margin_tables(self):
+        report = analyze(_normalized(), max_data_age_minutes=1000000)
+        markdown = render_markdown(report)
+        primary, auxiliary = markdown.split("## 辅助去水方法对比（Shin / 指数）")
+
+        self.assertIn("| 比赛 | 玩法 | 盘口 | 选项 | 竞彩赔率 | Pinnacle赔率 | 比例概率 | 比例EV |", primary)
+        self.assertNotIn("Shin概率", primary)
+        self.assertNotIn("指数概率", primary)
+        self.assertIn("Shin概率", auxiliary)
+        self.assertIn("指数EV", auxiliary)
+
+    def test_markdown_ev_markers_keep_input_order_and_skip_deep_negative_marker(self):
+        report = {
+            "report_status": "ok",
+            "generated_at": "2026-06-25T10:03:00+00:00",
+            "conclusion": "demo",
+            "source_validation": {"is_usable": True, "errors": []},
+            "snapshot_integrity": {"is_usable": True, "errors": [], "market_type_counts": {}},
+            "freshness": {},
+            "single_ev": [
+                _single_ev_row("M1", "First", 0.01),
+                _single_ev_row("M2", "Second", -0.01),
+                _single_ev_row("M3", "Third", -0.03),
+                _single_ev_row("M4", "Fourth", -0.06),
+            ],
+            "positive_single_ev": [],
+            "combo_candidates": [],
+            "unmatched": [],
+            "skipped": [],
+            "data_quality_warnings": [],
+            "risks": [],
+        }
+
+        markdown = render_markdown(report)
+
+        self.assertLess(markdown.index("First vs Away"), markdown.index("Second vs Away"))
+        self.assertLess(markdown.index("Second vs Away"), markdown.index("Third vs Away"))
+        self.assertLess(markdown.index("Third vs Away"), markdown.index("Fourth vs Away"))
+        self.assertIn("🟢 **1.00%**", markdown)
+        self.assertIn("🟡 -1.00%", markdown)
+        self.assertIn("🟠 -3.00%", markdown)
+        self.assertIn("| Fourth vs Away | 1x2 |  | home | 2.000 | 2.000 | 50.00% | -6.00% |", markdown)
+
     def test_markdown_outputs_freshness_times_in_beijing_and_omits_row_times(self):
         report = analyze(_normalized(), max_data_age_minutes=1000000)
         markdown = render_markdown(report)
@@ -265,6 +341,41 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(report["single_ev"], [])
         self.assertIn("market_snapshot_incomplete", report["snapshot_integrity"]["errors"][0])
         self.assertIn("Pinnacle 玩法计数：1x2=6", markdown)
+
+
+    def test_total_goals_tail_warning_does_not_block_other_markets(self):
+        normalized = _normalized()
+        normalized["matches"] = []
+        for match_index, match_id in enumerate(("M001", "M002", "M003")):
+            for market_type, handicap in (("1x2", ""), ("handicap_3way", "-1")):
+                normalized["matches"].append(
+                    {
+                        "match_id": f"{match_id}-{market_type}",
+                        "home_team": f"Home {match_index}",
+                        "away_team": f"Away {match_index}",
+                        "start_time": "2026-06-25T12:00:00+00:00",
+                        "market_type": market_type,
+                        "handicap": handicap,
+                        "matched_status": "matched",
+                        "match_confidence": 1.0,
+                        "sporttery": {"odds": {"home": 2.15, "draw": 3.2, "away": 3.1}},
+                        "market": {"odds": {"home": 1.9, "draw": 3.45, "away": 4.2}},
+                    }
+                )
+        normalized["snapshot_integrity"] = {
+            "is_usable": True,
+            "errors": [],
+            "market_type_counts": {"1x2": 3, "european_handicap": 3, "exact_total_goals": 3},
+            "sporttery_market_type_counts": {"had": 3, "hhad": 3, "ttg": 3},
+        }
+        normalized["unmatched"] = [{"reason": "total_goals_tail_not_equivalent"} for _ in range(3)]
+
+        report = analyze(normalized, max_data_age_minutes=1000000)
+
+        self.assertEqual(report["report_status"], "ok")
+        self.assertEqual(len(report["single_ev"]), 18)
+        self.assertEqual({item["market_type"] for item in report["single_ev"]}, {"1x2", "handicap_3way"})
+        self.assertEqual(len(report["unmatched"]), 3)
 
 
 if __name__ == "__main__":

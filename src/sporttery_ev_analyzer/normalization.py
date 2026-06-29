@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 from datetime import timedelta
 from pathlib import Path
@@ -7,6 +8,7 @@ from typing import Any
 
 from .io_utils import parse_iso_datetime, utc_now_iso
 from .sources import validate_source_names
+from .calculations import american_to_decimal
 
 DEFAULT_TEAM_ALIASES_PATH = Path(__file__).resolve().parents[2] / "config" / "world_cup_2026_team_aliases.json"
 MARKET_TYPE_ALIASES = {
@@ -63,6 +65,11 @@ def normalize_pair(
         if index not in used_market_indexes:
             unmatched.append({"source": market_raw.get("source", "market"), "match": market_match, "reason": "no_sporttery_match"})
 
+    source_errors = list(source_errors)
+    diagnostic = _time_delta_diagnostic(sporttery_rows, market_rows, alias_lookup, max_start_delta_minutes)
+    if diagnostic:
+        source_errors.append(diagnostic)
+
     return {
         "generated_at": utc_now_iso(),
         "inputs": {
@@ -84,7 +91,36 @@ def _extract_matches(raw: dict[str, Any]) -> list[dict[str, Any]]:
     matches = payload.get("matches")
     if not isinstance(matches, list):
         raise ValueError("raw snapshot must contain raw_payload.matches")
+    matches = deepcopy(matches)
+    if _canon(raw.get("odds_format")) == "american":
+        _convert_odds_to_decimal(matches)
     return matches
+
+
+def _convert_odds_to_decimal(matches: list[dict[str, Any]]) -> None:
+    """对声明 odds_format=american 的快照原地转小数。
+
+    Pinnacle API 返回美式整数 price；竞彩 DOM 已是欧式小数，故只需对市场侧转换。
+    转换作用于当前 odds 与 odds_history 全部历史行，下游 _market_key /
+    _partial_total_goals_market / _latest_market_snapshot 只需处理小数。
+    """
+    for match in matches:
+        for market in match.get("markets", []):
+            market["odds"] = _convert_odds_dict(market.get("odds", {}))
+            history = market.get("odds_history", [])
+            if isinstance(history, list):
+                for row in history:
+                    row["odds"] = _convert_odds_dict(row.get("odds", {}))
+
+
+def _convert_odds_dict(odds: dict[str, Any]) -> dict[str, float]:
+    converted: dict[str, float] = {}
+    for name, value in odds.items():
+        try:
+            converted[str(name)] = american_to_decimal(int(value))
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"cannot convert american odds {name}={value!r}: {exc}") from exc
+    return converted
 
 
 def _input_meta(raw: dict[str, Any]) -> dict[str, Any]:
@@ -143,6 +179,53 @@ def _match_confidence(
     return 1.0
 
 
+def _time_delta_diagnostic(
+    sporttery_rows: list[dict[str, Any]],
+    market_rows: list[dict[str, Any]],
+    alias_lookup: dict[str, str],
+    max_start_delta_minutes: int,
+) -> str | None:
+    """当球队名匹配但 start_time 偏差超阈值时，提示可能的时区误标。
+
+    场景：浏览器抓取的本地时间（如北京时间）被直接加 Z 后缀当 UTC 写盘，
+    导致与对端 UTC 时间相差整时区小时数，全部 unmatched 但无显式报错。
+    仅在存在"球队名匹配但时间不匹配"的明确信号时返回诊断字符串。
+    """
+    mismatched = 0
+    median_delta_hours: float | None = None
+    deltas: list[float] = []
+    for sporttery_match in sporttery_rows:
+        for market_match in market_rows:
+            teams_match = (
+                _canon_team(sporttery_match.get("home_team"), alias_lookup)
+                == _canon_team(market_match.get("home_team"), alias_lookup)
+                and _canon_team(sporttery_match.get("away_team"), alias_lookup)
+                == _canon_team(market_match.get("away_team"), alias_lookup)
+            )
+            if not teams_match:
+                continue
+            try:
+                sporttery_start = parse_iso_datetime(str(sporttery_match["start_time"]))
+                market_start = parse_iso_datetime(str(market_match["start_time"]))
+            except (KeyError, ValueError):
+                continue
+            delta = abs(sporttery_start - market_start)
+            if delta > timedelta(minutes=max_start_delta_minutes):
+                mismatched += 1
+                deltas.append(delta.total_seconds() / 3600)
+    if not mismatched:
+        return None
+    if deltas:
+        deltas.sort()
+        median_delta_hours = deltas[len(deltas) // 2]
+    hours_text = f" ~{median_delta_hours:.0f}h" if median_delta_hours is not None else ""
+    return (
+        f"possible_timezone_mismatch: {mismatched} sporttery rows match team names but "
+        f"start_time delta exceeds {max_start_delta_minutes}min threshold"
+        f"{hours_text}; check whether start_time is mislabeled UTC vs local time"
+    )
+
+
 def _merge_markets(
     sporttery_match: dict[str, Any],
     market_match: dict[str, Any],
@@ -174,12 +257,6 @@ def _merge_markets(
         if not indexed_market and key[0] == "total_goals":
             indexed_market = _partial_total_goals_market(key, sporttery_market, market_snapshots)
             if indexed_market:
-                _, partial_market = indexed_market
-                matched_outcomes = _shared_total_goals_outcomes(sporttery_market, partial_market)
-                sporttery_odds = {outcome: sporttery_market.get("odds", {})[outcome] for outcome in matched_outcomes}
-                partial_market = dict(partial_market)
-                partial_market["odds"] = {outcome: partial_market.get("odds", {})[outcome] for outcome in matched_outcomes}
-                indexed_market = (indexed_market[0], partial_market)
                 unmatched.append(
                     {
                         "source": "sporttery,market",
@@ -188,6 +265,7 @@ def _merge_markets(
                         "reason": "total_goals_tail_not_equivalent",
                     }
                 )
+                continue
         if not indexed_market:
             unmatched.append(
                 {
@@ -326,7 +404,12 @@ def _market_key(market: dict[str, Any]) -> tuple[str, str, frozenset[str]] | Non
     odds = market.get("odds", {})
     if not isinstance(odds, dict) or not odds:
         return None
-    return market_type, str(market.get("handicap", "")), frozenset(str(outcome) for outcome in odds)
+    # 非让球玩法（胜平负、总进球数）的 "0" 与 "" 等价，统一为 ""，避免 Sporttery had 用 "0" 而
+    # Pinnacle 1x2 用 "" 导致 unmatched（复盘 2026-06-28 §4.1）。让球玩法的 "0" 是有效盘口，保留。
+    handicap = str(market.get("handicap", ""))
+    if market_type != "handicap_3way" and handicap == "0":
+        handicap = ""
+    return market_type, handicap, frozenset(str(outcome) for outcome in odds)
 
 
 def _no_equivalent_market_reason(sporttery_market_type: str, unsupported_market_types: set[str]) -> str:
