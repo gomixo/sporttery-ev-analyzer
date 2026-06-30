@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .analysis import analyze, render_markdown
+from .backtest import backtest, render_markdown as render_backtest_markdown
 from .io_utils import read_json, write_json
 from .normalization import normalize_pair
 
@@ -29,6 +30,16 @@ def main() -> None:
     analyze_parser.add_argument("--kelly-fraction", type=float, default=0.1)
     analyze_parser.add_argument("--max-source-delta-minutes", type=int, default=180)
     analyze_parser.add_argument("--max-data-age-minutes", type=int, default=240)
+
+    backtest_parser = subparsers.add_parser("backtest", help="backtest historical EV reports against final scores")
+    backtest_parser.add_argument("--reports-dir", default="data/analysis")
+    backtest_parser.add_argument("--results", default="data/raw/fifa_results_june_25_to_now.json")
+    backtest_parser.add_argument("--rerun-dir")
+    backtest_parser.add_argument("--team-aliases", default="config/world_cup_2026_team_aliases.json")
+    backtest_parser.add_argument("--json-output", required=True)
+    backtest_parser.add_argument("--md-output", required=True)
+    backtest_parser.add_argument("--thresholds", type=float, nargs="+", default=[-0.05, -0.025])
+    backtest_parser.add_argument("--exclude-market-type", action="append", default=[])
 
     fetch_parser = subparsers.add_parser("fetch-browser", help="safe placeholder for manual low-frequency browser capture")
     fetch_parser.add_argument("--source", required=True, choices=["sporttery_browser", "pinnacle_browser"])
@@ -59,6 +70,21 @@ def main() -> None:
         md_path = Path(args.md_output)
         md_path.parent.mkdir(parents=True, exist_ok=True)
         md_path.write_text(render_markdown(report), encoding="utf-8")
+        return
+
+    if args.command == "backtest":
+        report = backtest(
+            args.reports_dir,
+            args.results,
+            rerun_dir=args.rerun_dir,
+            team_aliases=read_json(args.team_aliases) if args.team_aliases else None,
+            thresholds=tuple(args.thresholds),
+            excluded_market_types=tuple(args.exclude_market_type),
+        )
+        write_json(args.json_output, report)
+        md_path = Path(args.md_output)
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.write_text(render_backtest_markdown(report), encoding="utf-8-sig")
         return
 
     raise SystemExit(

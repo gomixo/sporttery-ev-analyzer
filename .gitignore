@@ -32,6 +32,7 @@ build/
 
 # Logs and caches
 *.log
+logs/
 .cache/
 .uploads/
 .pytest_cache/
@@ -42,11 +43,14 @@ coverage/
 
 # Local generated snapshots and reports
 data/
+analysis-backup/
+backtests*/
 reports/
 outputs/
 artifacts/
 screenshots/
 odds_update_times*.json
+*_ev_report.json
 
 # Development process documents and plans
 .agents/
